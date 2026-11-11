@@ -1,7 +1,7 @@
 // @ts-nocheck -- JWT request augmentation is narrowed by Auth route contracts.
 import jwt from 'jsonwebtoken';
 
-import { IS_PLATFORM } from '@/shared/utils.js';
+import { IS_PLATFORM, isLoginDisabled } from '@/shared/utils.js';
 
 import { userDb, appConfigDb } from '../database/index.js';
 
@@ -24,8 +24,8 @@ const validateApiKey = (req, res, next) => {
 
 // JWT authentication middleware
 const authenticateToken = async (req, res, next) => {
-  // Platform mode:  use single database user
-  if (IS_PLATFORM) {
+  // Platform mode and --no-login: use the single database user
+  if (IS_PLATFORM || isLoginDisabled()) {
     try {
       const user = userDb.getFirstUser();
       if (!user) {
@@ -116,8 +116,8 @@ const generateToken = (user) => {
 
 // WebSocket authentication function
 const authenticateWebSocket = (token) => {
-  // Platform mode: bypass token validation, return first user
-  if (IS_PLATFORM) {
+  // Platform mode and --no-login: bypass token validation, return first user
+  if (IS_PLATFORM || isLoginDisabled()) {
     try {
       const user = userDb.getFirstUser();
       if (user) {

@@ -61,12 +61,14 @@ test('applies CLI options to the injected environment before starting the server
     '--port',
     '8080',
     '--host=unix:/run/cloudcli/web.sock',
+    '--no-login',
     '--database-path=/data/app.db',
   ]);
 
   assert.equal(exitCode, 0);
   assert.equal(harness.environment.SERVER_PORT, '8080');
   assert.equal(harness.environment.HOST, 'unix:/run/cloudcli/web.sock');
+  assert.equal(harness.environment.CLOUDCLI_NO_LOGIN, 'true');
   assert.equal(harness.environment.DATABASE_PATH, '/data/app.db');
   assert.equal(harness.getServerStarts(), 1);
 });

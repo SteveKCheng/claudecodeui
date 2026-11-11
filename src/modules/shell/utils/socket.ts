@@ -1,5 +1,5 @@
 import { IS_PLATFORM } from '@/shared/utils';
-import { getStoredAuthToken } from '@/shared/authToken';
+import { getStoredAuthToken, isLoginDisabled } from '@/shared/authToken';
 
 type ShellInitMessage = {
   type: 'init';
@@ -45,7 +45,7 @@ type ShellIncomingMessage =
 export function getShellWebSocketUrl(): string | null {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
-  if (IS_PLATFORM) {
+  if (IS_PLATFORM || isLoginDisabled()) {
     return `${protocol}//${window.location.host}/shell`;
   }
 

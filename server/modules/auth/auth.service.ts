@@ -1,4 +1,4 @@
-import { AppError } from '@/shared/utils.js';
+import { AppError, isLoginDisabled } from '@/shared/utils.js';
 
 type AuthUser = {
   id: number | bigint;
@@ -45,6 +45,8 @@ export function createAuthService(dependencies: AuthDependencies) {
       return {
         needsSetup: !dependencies.users.hasUsers(),
         isAuthenticated: false,
+        // Tells the client to load the user without a token instead of showing the login form.
+        ...(isLoginDisabled() ? { loginDisabled: true } : {}),
       };
     },
 

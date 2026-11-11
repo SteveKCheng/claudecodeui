@@ -43,6 +43,17 @@ import type {
  */
 export const IS_PLATFORM = process.env.VITE_IS_PLATFORM === 'true';
 
+/**
+ * Whether `--no-login` (CLOUDCLI_NO_LOGIN=true) is in effect: every request that
+ * reaches the server acts as its single local user, as in Platform mode, for
+ * deployments that restrict access before requests get here (a Unix socket with
+ * filesystem permissions, an authenticating reverse proxy). A function rather
+ * than a constant because the CLI sets the variable after this module loads.
+ */
+export function isLoginDisabled(): boolean {
+  return process.env.CLOUDCLI_NO_LOGIN === 'true';
+}
+
 // ---------------------------
 //----------------- NORMALIZED MESSAGE HELPER INPUT TYPES ------------
 /**

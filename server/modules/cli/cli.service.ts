@@ -30,6 +30,7 @@ type ParsedCliArguments = {
   options: {
     serverPort?: string;
     host?: string;
+    noLogin?: boolean;
     databasePath?: string;
   };
   remainingArguments: string[];
@@ -52,6 +53,8 @@ function parseCliArguments(argumentsList: string[]): ParsedCliArguments {
       parsedArguments.options.host = argumentsList[++argumentIndex];
     } else if (argument.startsWith('--host=')) {
       parsedArguments.options.host = argument.slice('--host='.length);
+    } else if (argument === '--no-login') {
+      parsedArguments.options.noLogin = true;
     } else if (argument === '--database-path') {
       parsedArguments.options.databasePath = argumentsList[++argumentIndex];
     } else if (argument.startsWith('--database-path=')) {
@@ -109,6 +112,7 @@ function showStatus(dependencies: CliServiceDependencies): void {
   output.log(`\n${terminalTextStyles.info('[INFO]')} Configuration:`);
   output.log(`       SERVER_PORT: ${terminalTextStyles.bright(environment.SERVER_PORT || environment.PORT || '3001')} ${terminalTextStyles.dim(environment.SERVER_PORT || environment.PORT ? '' : '(default)')}`);
   output.log(`       HOST: ${terminalTextStyles.bright(environment.HOST || '0.0.0.0')} ${terminalTextStyles.dim(environment.HOST ? '' : '(default)')}`);
+  output.log(`       LOGIN: ${environment.CLOUDCLI_NO_LOGIN === 'true' ? terminalTextStyles.warn('disabled (--no-login)') : terminalTextStyles.dim('required (default)')}`);
   output.log(`       DATABASE_PATH: ${terminalTextStyles.dim(environment.DATABASE_PATH || '(using default location)')}`);
   output.log(`       CLAUDE_CLI_PATH: ${terminalTextStyles.dim(environment.CLAUDE_CLI_PATH || 'claude (default)')}`);
   output.log(`       CONTEXT_WINDOW: ${terminalTextStyles.dim(environment.CONTEXT_WINDOW || '160000 (default)')}`);
@@ -154,6 +158,10 @@ Options:
   --host <address>            Address to listen on (default: 0.0.0.0);
                               "localhost" means both 127.0.0.1 and ::1,
                               "unix:/path/to.sock" a Unix domain socket
+  --no-login                  Skip the login page: every request acts as the
+                              local user. Only use when access is restricted
+                              otherwise (Unix socket permissions, a proxy
+                              that authenticates clients)
   --database-path <path>      Set custom database location
   -h, --help                  Show this help information
   -v, --version               Show version information
@@ -168,6 +176,7 @@ Environment Variables:
   SERVER_PORT         Set server port (default: 3001)
   PORT                Set server port (default: 3001) (LEGACY)
   HOST                Address to listen on (default: 0.0.0.0), as for --host
+  CLOUDCLI_NO_LOGIN   Set to "true" for the same effect as --no-login
   DATABASE_PATH       Set custom database location
   CLAUDE_CLI_PATH     Set custom Claude CLI path
   CONTEXT_WINDOW      Fallback context window size (default: 160000)
@@ -236,6 +245,9 @@ export function createCliService(dependencies: CliServiceDependencies): CliAppli
       }
       if (parsedArguments.options.host) {
         dependencies.environment.HOST = parsedArguments.options.host;
+      }
+      if (parsedArguments.options.noLogin) {
+        dependencies.environment.CLOUDCLI_NO_LOGIN = 'true';
       }
       if (parsedArguments.options.databasePath) {
         dependencies.environment.DATABASE_PATH = parsedArguments.options.databasePath;

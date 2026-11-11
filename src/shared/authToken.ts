@@ -71,6 +71,16 @@ export const getAuthTokenRefreshDelay = (token: unknown): number | null => {
   return Math.max(0, refreshAt - Date.now());
 };
 
+// Set from /api/auth/status when the server runs with --no-login: it then acts as
+// its single local user for every request, so no token is needed or available.
+let loginDisabled = false;
+
+export const setLoginDisabled = (disabled: boolean): void => {
+  loginDisabled = disabled;
+};
+
+export const isLoginDisabled = (): boolean => loginDisabled;
+
 export const expireAuthSession = (): void => {
   localStorage.removeItem('auth-token');
   if (typeof window !== 'undefined') {

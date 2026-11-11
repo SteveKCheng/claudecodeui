@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { useAuth } from '@/modules/auth';
 import { IS_PLATFORM } from '@/shared/utils';
-import { expireAuthSession, isAuthTokenExpired } from '@/shared/authToken';
+import { expireAuthSession, isAuthTokenExpired, isLoginDisabled } from '@/shared/authToken';
 import type { ServerEvent } from '@/shared/types';
 
 
@@ -52,6 +52,7 @@ export const useWebSocket = () => {
 const buildWebSocketUrl = (token: string | null) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   if (IS_PLATFORM) return `${protocol}//${window.location.host}/ws`; // Platform mode: Use same domain as the page (goes through proxy)
+  if (isLoginDisabled()) return `${protocol}//${window.location.host}/ws`; // --no-login: the server needs no token
   if (!token) return null;
   if (isAuthTokenExpired(token)) {
     expireAuthSession();

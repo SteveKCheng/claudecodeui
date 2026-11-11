@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 
 import { IS_PLATFORM } from '@/shared/utils';
 import { api, readApiErrorMessage } from '@/shared/api';
-import { AUTH_SESSION_EXPIRED_EVENT, AUTH_TOKEN_REFRESHED_EVENT, getAuthTokenRefreshDelay, isValidRefreshedToken, storeAuthToken } from '@/shared/authToken';
+import { AUTH_SESSION_EXPIRED_EVENT, AUTH_TOKEN_REFRESHED_EVENT, getAuthTokenRefreshDelay, isLoginDisabled, isValidRefreshedToken, setLoginDisabled, storeAuthToken } from '@/shared/authToken';
 import { hydrateChatDrafts, resetChatDrafts } from '@/shared/chatDrafts';
 import { hydrateUserPreferences, resetUserPreferences } from '@/shared/userSettings';
 /** The signed-in account held by AuthContext - a required `username` plus an optional id and any additional fields the auth API returns - and should be read through `useAuth()` rather than re-derived from raw auth responses. */
@@ -33,6 +33,7 @@ type AuthSessionPayload = {
 
 type AuthStatusPayload = {
   needsSetup?: boolean;
+  loginDisabled?: boolean;
 };
 
 type AuthUserPayload = {
@@ -208,12 +209,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       setNeedsSetup(false);
+      setLoginDisabled(Boolean(statusPayload?.loginDisabled));
 
       // Read the stored token instead of depending on `token` state: this
       // bootstrap flips `isLoading`, which swaps the whole app for the loading
       // screen, so it must run once on mount and not again on every
       // X-Refreshed-Token rotation (each one remounted the workspace, #1269).
-      if (!readStoredToken()) {
+      // With login disabled the server answers as its local user without one.
+      if (!isLoginDisabled() && !readStoredToken()) {
         return;
       }
 
@@ -350,6 +353,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   );
 
   const logout = useCallback(() => {
+    // With login disabled there is no session to end; clearing it would only
+    // show a login form the server does not need.
+    if (isLoginDisabled()) {
+      return;
+    }
     // JWT logout is client-side: the server endpoint does not maintain a
     // revocation list, so clearing the session is the complete operation.
     clearSession();
