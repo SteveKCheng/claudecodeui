@@ -650,10 +650,13 @@ export type ProviderRuntimeContext = {
    * Builds the SDK query for a run. Production leaves this unset and the
    * runtime uses the SDK's own; tests supply a scripted stream so the hold
    * and background-work paths can be driven without a CLI process.
+   * The control methods resolve to whatever the SDK reports (`interrupt()`
+   * resolves to its control response in current SDKs); the runtime only
+   * awaits them, so their results are left as `unknown`.
    */
   createQuery?: (input: { prompt: AsyncIterable<unknown>; options: AnyRecord }) => AsyncIterable<unknown> & {
-    interrupt(): Promise<void>;
-    stopTask?(taskId: string): Promise<void>;
+    interrupt(): Promise<unknown>;
+    stopTask?(taskId: string): Promise<unknown>;
   };
 };
 
