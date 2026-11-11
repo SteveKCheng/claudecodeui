@@ -19,6 +19,7 @@ import {
 import { chatRunRegistry, createWebSocketServer } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
+import { describeListenTarget, listenOnTarget, parseListenTarget, type ListenTarget } from '@/shared/listen-target.js';
 
 import { createGitModule } from './modules/git/index.js';
 import {
@@ -281,7 +282,15 @@ app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
 
 const SERVER_PORT = Number.parseInt(process.env.SERVER_PORT || '3001', 10);
 const HOST = process.env.HOST || '0.0.0.0';
-const DISPLAY_HOST = getConnectableHost(HOST);
+let LISTEN_TARGET: ListenTarget;
+try {
+    LISTEN_TARGET = parseListenTarget(HOST, SERVER_PORT);
+} catch (error) {
+    console.error(`[ERROR] ${getErrorMessage(error)}`);
+    process.exit(1);
+}
+const SERVER_URL = describeListenTarget(LISTEN_TARGET);
+const DISPLAY_HOST = getConnectableHost(LISTEN_TARGET.kind === 'tcp' ? HOST : undefined);
 const VITE_PORT = process.env.VITE_PORT || 5173;
 const LOCAL_SERVER_MARKER_PATH = path.join(os.homedir(), '.cloudcli', 'local-server.json');
 
@@ -300,8 +309,9 @@ async function writeLocalServerMarker() {
     const marker = {
         pid: process.pid,
         host: HOST,
-        port: Number.parseInt(String(SERVER_PORT), 10),
-        url: `http://${DISPLAY_HOST}:${SERVER_PORT}`,
+        port: LISTEN_TARGET.kind === 'tcp' ? LISTEN_TARGET.port : null,
+        ...(LISTEN_TARGET.kind === 'unix' ? { socketPath: LISTEN_TARGET.socketPath } : {}),
+        url: LISTEN_TARGET.kind === 'tcp' ? SERVER_URL : null,
         installMode,
         appRoot: APP_ROOT,
         updatedAt: new Date().toISOString(),
@@ -347,12 +357,12 @@ async function startServer() {
         console.log('');
 
         if (isProduction) {
-            console.log(`${terminalTextStyles.info('[INFO]')} To run in production mode, go to http://${DISPLAY_HOST}:${SERVER_PORT}`);
+            console.log(`${terminalTextStyles.info('[INFO]')} To run in production mode, go to ${SERVER_URL}`);
         }
 
         console.log(`${terminalTextStyles.info('[INFO]')} To run in development mode with hot-module replacement, go to http://${DISPLAY_HOST}:${VITE_PORT}`);
    
-        server.listen(SERVER_PORT, HOST, async () => {
+        void listenOnTarget(server, LISTEN_TARGET).then(async () => {
             const appInstallPath = APP_ROOT;
             await writeLocalServerMarker().catch((error) => {
                 console.warn('[WARN] Could not write local server marker:', error.message);
@@ -363,7 +373,7 @@ async function startServer() {
             console.log(`  ${terminalTextStyles.bright('CloudCLI Server - Ready')}`);
             console.log(terminalTextStyles.dim('═'.repeat(63)));
             console.log('');
-            console.log(`${terminalTextStyles.info('[INFO]')} Server URL:  ${terminalTextStyles.bright('http://' + DISPLAY_HOST + ':' + SERVER_PORT)}`);
+            console.log(`${terminalTextStyles.info('[INFO]')} Server URL:  ${terminalTextStyles.bright(SERVER_URL)}`);
             console.log(`${terminalTextStyles.info('[INFO]')} Installed at: ${terminalTextStyles.dim(appInstallPath)}`);
             console.log(`${terminalTextStyles.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');
@@ -390,6 +400,9 @@ async function startServer() {
             startEnabledPluginServers().catch(err => {
                 console.error('[Plugins] Error during startup:', err.message);
             });
+        }, (error) => {
+            console.error(`[ERROR] Could not listen on ${SERVER_URL}:`, getErrorMessage(error));
+            process.exit(1);
         });
 
         await closeSessionsWatcher();
@@ -410,6 +423,10 @@ async function startServer() {
                 await removeLocalServerMarker();
             } catch (err) {
                 console.error('[Local Server] Error removing server marker during shutdown:', getErrorMessage(err));
+            }
+            // process.exit() skips server.close(), which is what would remove the socket file.
+            if (LISTEN_TARGET.kind === 'unix') {
+                fs.rmSync(LISTEN_TARGET.socketPath, { force: true });
             }
             process.exit(0);
         };

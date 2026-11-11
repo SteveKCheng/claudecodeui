@@ -29,6 +29,7 @@ type ParsedCliArguments = {
   command: string;
   options: {
     serverPort?: string;
+    host?: string;
     databasePath?: string;
   };
   remainingArguments: string[];
@@ -47,6 +48,10 @@ function parseCliArguments(argumentsList: string[]): ParsedCliArguments {
       parsedArguments.options.serverPort = argumentsList[++argumentIndex];
     } else if (argument.startsWith('--port=')) {
       parsedArguments.options.serverPort = argument.slice('--port='.length);
+    } else if (argument === '--host') {
+      parsedArguments.options.host = argumentsList[++argumentIndex];
+    } else if (argument.startsWith('--host=')) {
+      parsedArguments.options.host = argument.slice('--host='.length);
     } else if (argument === '--database-path') {
       parsedArguments.options.databasePath = argumentsList[++argumentIndex];
     } else if (argument.startsWith('--database-path=')) {
@@ -103,6 +108,7 @@ function showStatus(dependencies: CliServiceDependencies): void {
 
   output.log(`\n${terminalTextStyles.info('[INFO]')} Configuration:`);
   output.log(`       SERVER_PORT: ${terminalTextStyles.bright(environment.SERVER_PORT || environment.PORT || '3001')} ${terminalTextStyles.dim(environment.SERVER_PORT || environment.PORT ? '' : '(default)')}`);
+  output.log(`       HOST: ${terminalTextStyles.bright(environment.HOST || '0.0.0.0')} ${terminalTextStyles.dim(environment.HOST ? '' : '(default)')}`);
   output.log(`       DATABASE_PATH: ${terminalTextStyles.dim(environment.DATABASE_PATH || '(using default location)')}`);
   output.log(`       CLAUDE_CLI_PATH: ${terminalTextStyles.dim(environment.CLAUDE_CLI_PATH || 'claude (default)')}`);
   output.log(`       CONTEXT_WINDOW: ${terminalTextStyles.dim(environment.CONTEXT_WINDOW || '160000 (default)')}`);
@@ -145,6 +151,9 @@ Commands:
 
 Options:
   -p, --port <port>           Set server port (default: 3001)
+  --host <address>            Address to listen on (default: 0.0.0.0);
+                              "localhost" means both 127.0.0.1 and ::1,
+                              "unix:/path/to.sock" a Unix domain socket
   --database-path <path>      Set custom database location
   -h, --help                  Show this help information
   -v, --version               Show version information
@@ -158,6 +167,7 @@ Examples:
 Environment Variables:
   SERVER_PORT         Set server port (default: 3001)
   PORT                Set server port (default: 3001) (LEGACY)
+  HOST                Address to listen on (default: 0.0.0.0), as for --host
   DATABASE_PATH       Set custom database location
   CLAUDE_CLI_PATH     Set custom Claude CLI path
   CONTEXT_WINDOW      Fallback context window size (default: 160000)
@@ -223,6 +233,9 @@ export function createCliService(dependencies: CliServiceDependencies): CliAppli
         dependencies.environment.SERVER_PORT = parsedArguments.options.serverPort;
       } else if (!dependencies.environment.SERVER_PORT && dependencies.environment.PORT) {
         dependencies.environment.SERVER_PORT = dependencies.environment.PORT;
+      }
+      if (parsedArguments.options.host) {
+        dependencies.environment.HOST = parsedArguments.options.host;
       }
       if (parsedArguments.options.databasePath) {
         dependencies.environment.DATABASE_PATH = parsedArguments.options.databasePath;

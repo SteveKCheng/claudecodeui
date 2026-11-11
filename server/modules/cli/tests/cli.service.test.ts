@@ -60,11 +60,13 @@ test('applies CLI options to the injected environment before starting the server
   const exitCode = await harness.service.run([
     '--port',
     '8080',
+    '--host=unix:/run/cloudcli/web.sock',
     '--database-path=/data/app.db',
   ]);
 
   assert.equal(exitCode, 0);
   assert.equal(harness.environment.SERVER_PORT, '8080');
+  assert.equal(harness.environment.HOST, 'unix:/run/cloudcli/web.sock');
   assert.equal(harness.environment.DATABASE_PATH, '/data/app.db');
   assert.equal(harness.getServerStarts(), 1);
 });
