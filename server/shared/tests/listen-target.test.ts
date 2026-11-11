@@ -1,18 +1,24 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   describeListenTarget,
   getLocalOrigin,
   listenOnTarget,
   parseListenTarget,
+  takeSocketActivation,
 } from '@/shared/listen-target.js';
+
+const LISTEN_TARGET_MODULE = pathToFileURL(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'listen-target.ts'),
+).href;
 
 function closeServer(server: http.Server): Promise<void> {
   return new Promise((resolve) => server.close(() => resolve()));
@@ -114,5 +120,87 @@ test('listenOnTarget refuses a Unix socket path that is in use or not a socket',
   } finally {
     await closeServer(first);
     fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('takeSocketActivation follows sd_listen_fds and clears its variables', () => {
+  assert.equal(takeSocketActivation({}, 100), null);
+
+  const matching: NodeJS.ProcessEnv = {
+    LISTEN_FDS: '2', LISTEN_PID: '100', LISTEN_PIDFDID: '4242', LISTEN_FDNAMES: 'web:web6', OTHER: 'kept',
+  };
+  assert.deepEqual(takeSocketActivation(matching, 100), {
+    sockets: [{ fd: 3, name: 'web' }, { fd: 4, name: 'web6' }],
+  });
+  assert.deepEqual(matching, { OTHER: 'kept' });
+
+  // A wrapper that forks (bwrap, `sh -c` without exec) leaves LISTEN_PID pointing elsewhere.
+  const forked: NodeJS.ProcessEnv = { LISTEN_FDS: '1', LISTEN_PID: '99' };
+  assert.deepEqual(takeSocketActivation(forked, 100), { ignored: 'LISTEN_PID is 99, not this process (100)' });
+  assert.deepEqual(forked, {});
+
+  assert.match(
+    (takeSocketActivation({ LISTEN_FDS: '0', LISTEN_PID: '100' }, 100) as { ignored: string }).ignored,
+    /not a positive number/,
+  );
+});
+
+function listenTcp(host: string): Promise<net.Server> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, host, () => resolve(server));
+  });
+}
+
+test('listenOnTarget accepts on sockets passed in as fds 3 and 4 without binding', async (t) => {
+  if (process.platform !== 'linux') {
+    t.skip('socket activation is Linux-only');
+    return;
+  }
+  // Stand in for systemd: open listening sockets, then hand them to a child as
+  // fds 3 and 4. Only the child keeps them once this process closes its copies.
+  const ipv4 = await listenTcp('127.0.0.1');
+  const ipv6 = await listenTcp('::1').catch(() => null);
+  if (!ipv6) {
+    ipv4.close();
+    t.skip('IPv6 loopback is unavailable');
+    return;
+  }
+  const port4 = (ipv4.address() as net.AddressInfo).port;
+  const port6 = (ipv6.address() as net.AddressInfo).port;
+  const fdOf = (server: net.Server) => (server as unknown as { _handle: { fd: number } })._handle.fd;
+
+  const script = `
+    process.env.LISTEN_PID = String(process.pid);
+    const { takeSocketActivation, listenOnTarget, describeListenTarget } = await import(${JSON.stringify(LISTEN_TARGET_MODULE)});
+    const http = await import('node:http');
+    const activation = takeSocketActivation();
+    const target = { kind: 'fds', sockets: activation.sockets };
+    const server = http.createServer((request, response) => response.end('served from ' + request.socket.localAddress));
+    await listenOnTarget(server, target);
+    console.log(JSON.stringify({ description: describeListenTarget(target), leftover: process.env.LISTEN_FDS ?? null }));
+  `;
+  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+    env: { ...process.env, LISTEN_FDS: '2', LISTEN_FDNAMES: 'web:web6' },
+    stdio: ['ignore', 'pipe', 'inherit', fdOf(ipv4), fdOf(ipv6)],
+  });
+  try {
+    const report = await new Promise<{ description: string; leftover: string | null }>((resolve, reject) => {
+      assert.ok(child.stdout, 'stdout is piped');
+      child.stdout.once('data', (chunk) => resolve(JSON.parse(String(chunk))));
+      child.once('exit', (code) => reject(new Error(`child exited early with ${code}`)));
+    });
+    await Promise.all([new Promise((resolve) => ipv4.close(resolve)), new Promise((resolve) => ipv6.close(resolve))]);
+
+    assert.equal(report.leftover, null);
+    assert.equal(
+      report.description,
+      `systemd socket activation: fd 3 "web" = tcp 127.0.0.1:${port4}, fd 4 "web6" = tcp [::1]:${port6}`,
+    );
+    assert.equal(await getText({ host: '127.0.0.1', port: port4 }), 'served from 127.0.0.1');
+    assert.equal(await getText({ host: '::1', port: port6 }), 'served from ::1');
+  } finally {
+    child.kill();
   }
 });

@@ -9,7 +9,7 @@ import spawn from 'cross-spawn';
 
 import { appConfigDb } from '@/modules/database/index.js';
 import { providerMcpService } from '@/modules/providers/index.js';
-import { getLocalOrigin, parseListenTarget } from '@/shared/listen-target.js';
+import { getActiveListenTarget, getLocalOrigin, parseListenTarget } from '@/shared/listen-target.js';
 import { getModuleDirectory } from '@/shared/utils.js';
 
 import { getBrowserUseRuntime } from './browser-use-runtime.js';
@@ -182,10 +182,12 @@ function getMcpCommand(): { command: string; args: string[] } {
 
 function getMcpApiUrl(): string {
   const port = Number.parseInt(process.env.SERVER_PORT || process.env.PORT || '3001', 10);
-  const origin = getLocalOrigin(parseListenTarget(process.env.HOST, port));
+  const origin = getLocalOrigin(getActiveListenTarget() ?? parseListenTarget(process.env.HOST, port));
   if (!origin) {
-    // The MCP process reaches the server over plain HTTP; a Unix socket gives it nothing to connect to.
-    throw new Error('Browser Use needs the server to listen on a TCP address; it is unavailable while HOST is a Unix socket.');
+    // The MCP process reaches the server over plain HTTP at a known address; a
+    // Unix socket gives it nothing to connect to, and sockets passed in by
+    // systemd have no address the server can report.
+    throw new Error('Browser Use needs the server to listen on a TCP address set with --host/--port; it is unavailable on a Unix socket or with systemd socket activation.');
   }
   return `${origin}/api/browser-use-mcp`;
 }

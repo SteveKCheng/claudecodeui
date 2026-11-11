@@ -49,6 +49,8 @@ export const IS_PLATFORM = process.env.VITE_IS_PLATFORM === 'true';
  * deployments that restrict access before requests get here (a Unix socket with
  * filesystem permissions, an authenticating reverse proxy). A function rather
  * than a constant because the CLI sets the variable after this module loads.
+ * Used by the Auth module (token middleware and the status endpoint, which tells
+ * the client) and by the server bootstrap for its startup warning.
  */
 export function isLoginDisabled(): boolean {
   return process.env.CLOUDCLI_NO_LOGIN === 'true';

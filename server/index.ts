@@ -11,6 +11,13 @@ import cors from 'cors';
 
 import { AppError, findApplicationRoot, getModuleDirectory, IS_PLATFORM, isLoginDisabled, terminalTextStyles } from '@/shared/utils.js';
 import {
+    describeListenTarget,
+    listenOnTarget,
+    parseListenTarget,
+    takeSocketActivation,
+    type ListenTarget,
+} from '@/shared/listen-target.js';
+import {
     closeSessionsWatcher,
     initializeSessionsWatcher,
     providerRuntimeService,
@@ -19,7 +26,6 @@ import {
 import { chatRunRegistry, createWebSocketServer } from '@/modules/websocket/index.js';
 
 import { getConnectableHost } from '../shared/networkHosts.js';
-import { describeListenTarget, listenOnTarget, parseListenTarget, type ListenTarget } from '@/shared/listen-target.js';
 
 import { createGitModule } from './modules/git/index.js';
 import {
@@ -282,12 +288,22 @@ app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
 
 const SERVER_PORT = Number.parseInt(process.env.SERVER_PORT || '3001', 10);
 const HOST = process.env.HOST || '0.0.0.0';
+// Sockets passed in by systemd take precedence over HOST and the port.
+const SOCKET_ACTIVATION = takeSocketActivation();
+if (SOCKET_ACTIVATION && 'ignored' in SOCKET_ACTIVATION) {
+    console.warn(`${terminalTextStyles.warn('[WARN]')} Not using systemd socket activation: ${SOCKET_ACTIVATION.ignored}`);
+}
 let LISTEN_TARGET: ListenTarget;
 try {
-    LISTEN_TARGET = parseListenTarget(HOST, SERVER_PORT);
+    LISTEN_TARGET = SOCKET_ACTIVATION && 'sockets' in SOCKET_ACTIVATION
+        ? { kind: 'fds', sockets: SOCKET_ACTIVATION.sockets }
+        : parseListenTarget(HOST, SERVER_PORT);
 } catch (error) {
     console.error(`[ERROR] ${getErrorMessage(error)}`);
     process.exit(1);
+}
+if (LISTEN_TARGET.kind === 'fds' && process.env.HOST) {
+    console.log(`${terminalTextStyles.info('[INFO]')} Socket-activated: ignoring HOST=${process.env.HOST}`);
 }
 const SERVER_URL = describeListenTarget(LISTEN_TARGET);
 const DISPLAY_HOST = getConnectableHost(LISTEN_TARGET.kind === 'tcp' ? HOST : undefined);
@@ -311,6 +327,7 @@ async function writeLocalServerMarker() {
         host: HOST,
         port: LISTEN_TARGET.kind === 'tcp' ? LISTEN_TARGET.port : null,
         ...(LISTEN_TARGET.kind === 'unix' ? { socketPath: LISTEN_TARGET.socketPath } : {}),
+        ...(LISTEN_TARGET.kind === 'fds' ? { socketActivated: SERVER_URL } : {}),
         url: LISTEN_TARGET.kind === 'tcp' ? SERVER_URL : null,
         installMode,
         appRoot: APP_ROOT,
@@ -356,7 +373,7 @@ async function startServer() {
         console.log(`${terminalTextStyles.info('[INFO]')} Using Claude Agents SDK for Claude integration`);
         console.log('');
 
-        if (isProduction) {
+        if (isProduction && LISTEN_TARGET.kind === 'tcp') {
             console.log(`${terminalTextStyles.info('[INFO]')} To run in production mode, go to ${SERVER_URL}`);
         }
 
@@ -373,9 +390,10 @@ async function startServer() {
             console.log(`  ${terminalTextStyles.bright('CloudCLI Server - Ready')}`);
             console.log(terminalTextStyles.dim('═'.repeat(63)));
             console.log('');
-            console.log(`${terminalTextStyles.info('[INFO]')} Server URL:  ${terminalTextStyles.bright(SERVER_URL)}`);
+            // Printed for every kind of target so a misconfigured setup shows where the server really is.
+            console.log(`${terminalTextStyles.info('[INFO]')} ${LISTEN_TARGET.kind === 'tcp' ? 'Server URL:  ' : 'Listening on:'} ${terminalTextStyles.bright(SERVER_URL)}`);
             if (isLoginDisabled()) {
-                console.log(`${terminalTextStyles.warn('[WARN]')} Login is disabled (--no-login): whoever can reach ${SERVER_URL} has full access`);
+                console.log(`${terminalTextStyles.warn('[WARN]')} Login is disabled (--no-login): anyone who can connect to the address above has full access`);
             }
             console.log(`${terminalTextStyles.info('[INFO]')} Installed at: ${terminalTextStyles.dim(appInstallPath)}`);
             console.log(`${terminalTextStyles.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);

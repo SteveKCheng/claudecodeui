@@ -157,8 +157,10 @@ Options:
   -p, --port <port>           Set server port (default: 3001)
   --host <address>            Address to listen on (default: 0.0.0.0);
                               "localhost" means both 127.0.0.1 and ::1,
-                              "unix:/path/to.sock" a Unix domain socket
-  --no-login                  Skip the login page: every request acts as the
+                              "unix:/path/to.sock" a Unix domain socket.
+                              Under systemd socket activation (LISTEN_FDS)
+                              the passed-in sockets are used instead
+  --no-login                 Skip the login page: every request acts as the
                               local user. Only use when access is restricted
                               otherwise (Unix socket permissions, a proxy
                               that authenticates clients)
