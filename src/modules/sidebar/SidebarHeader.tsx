@@ -1,4 +1,4 @@
-import { FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
+import { ArrowUpCircle, FolderPlus, Plus, RefreshCw, Search, X, PanelLeftClose } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Button, Input } from '@/shared/ui';
@@ -27,6 +27,9 @@ type SidebarHeaderProps = {
   isRefreshing: boolean;
   onCreateProject: () => void;
   onCollapseSidebar: () => void;
+  updateAvailable: boolean;
+  latestVersion: string | null;
+  onShowVersionModal: () => void;
   t: TFunction;
 };
 
@@ -49,6 +52,32 @@ function LogoBlock({ t }: { t: TFunction }) {
   );
 }
 
+/** Small icon beside the wordmark when a newer release exists; opens the version dialog. */
+function UpdateNoticeButton({
+  latestVersion,
+  onShowVersionModal,
+  t,
+}: {
+  latestVersion: string | null;
+  onShowVersionModal: () => void;
+  t: TFunction;
+}) {
+  const label = latestVersion
+    ? `${t('version.updateAvailable')}: v${latestVersion}`
+    : t('version.updateAvailable');
+  return (
+    <button
+      type="button"
+      onClick={onShowVersionModal}
+      className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-blue-500/70 transition-colors hover:bg-accent/80 hover:text-blue-500 dark:text-blue-400/70 dark:hover:text-blue-400"
+      aria-label={label}
+      title={label}
+    >
+      <ArrowUpCircle className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
 /** Rendered by SidebarContent at the top of the panel for the search box, search-mode tabs, refresh and new-project actions. */
 export default function SidebarHeader({
   isPWA,
@@ -67,6 +96,9 @@ export default function SidebarHeader({
   isRefreshing,
   onCreateProject,
   onCollapseSidebar,
+  updateAvailable,
+  latestVersion,
+  onShowVersionModal,
   t,
 }: SidebarHeaderProps) {
   const showSearchTools = (projectsCount > 0 || runningSessionsCount > 0 || archivedSessionsCount > 0 || isArchivedSessionsLoading) && !isLoading;
@@ -86,17 +118,22 @@ export default function SidebarHeader({
         style={{}}
       >
         <div className="flex items-center justify-between gap-2">
-          {IS_PLATFORM ? (
-            <a
-              href="https://cloudcli.ai/dashboard"
-              className="flex min-w-0 items-center gap-2.5 transition-opacity hover:opacity-80"
-              title={t('tooltips.viewEnvironments')}
-            >
+          <div className="flex min-w-0 items-center gap-1">
+            {IS_PLATFORM ? (
+              <a
+                href="https://cloudcli.ai/dashboard"
+                className="flex min-w-0 items-center gap-2.5 transition-opacity hover:opacity-80"
+                title={t('tooltips.viewEnvironments')}
+              >
+                <LogoBlock t={t} />
+              </a>
+            ) : (
               <LogoBlock t={t} />
-            </a>
-          ) : (
-            <LogoBlock t={t} />
-          )}
+            )}
+            {updateAvailable && (
+              <UpdateNoticeButton latestVersion={latestVersion} onShowVersionModal={onShowVersionModal} t={t} />
+            )}
+          </div>
 
           <div className="flex flex-shrink-0 items-center gap-0.5">
             <Button
@@ -185,17 +222,22 @@ export default function SidebarHeader({
         style={isPWA && isMobile ? { paddingTop: '16px' } : {}}
       >
         <div className="flex items-center justify-between">
-          {IS_PLATFORM ? (
-            <a
-              href="https://cloudcli.ai/dashboard"
-              className="flex min-w-0 items-center gap-2.5 transition-opacity active:opacity-70"
-              title={t('tooltips.viewEnvironments')}
-            >
+          <div className="flex min-w-0 items-center gap-1">
+            {IS_PLATFORM ? (
+              <a
+                href="https://cloudcli.ai/dashboard"
+                className="flex min-w-0 items-center gap-2.5 transition-opacity active:opacity-70"
+                title={t('tooltips.viewEnvironments')}
+              >
+                <LogoBlock t={t} />
+              </a>
+            ) : (
               <LogoBlock t={t} />
-            </a>
-          ) : (
-            <LogoBlock t={t} />
-          )}
+            )}
+            {updateAvailable && (
+              <UpdateNoticeButton latestVersion={latestVersion} onShowVersionModal={onShowVersionModal} t={t} />
+            )}
+          </div>
 
           <div className="flex flex-shrink-0 gap-1.5">
             <button

@@ -3,7 +3,7 @@ import { Activity, Archive, Folder, MessageSquare, RotateCcw, Search, Trash2 } f
 import type { TFunction } from 'i18next';
 
 import { LLMProviderLogo, ScrollArea } from '@/shared/ui';
-import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationSearchResults, Project, RecentConversationListItem, ReleaseInfo, SearchProgress, SidebarProjectListProps, SidebarSearchMode } from '@/shared/types';
+import type { ArchivedProjectListItem, ArchivedSessionListItem, ConversationSearchResults, Project, RecentConversationListItem, SearchProgress, SidebarProjectListProps, SidebarSearchMode } from '@/shared/types';
 import { formatCompactAge, getAllSessions } from '@/modules/sidebar/utils/sidebarProjectFormatting';
 import SidebarFooter from '@/modules/sidebar/SidebarFooter';
 import SidebarHeader from '@/modules/sidebar/SidebarHeader';
@@ -120,7 +120,6 @@ type SidebarContentProps = {
   onCollapseSidebar: () => void;
   updateAvailable: boolean;
   restartRequired: boolean;
-  releaseInfo: ReleaseInfo | null;
   latestVersion: string | null;
   onShowVersionModal: () => void;
   onShowSettings: () => void;
@@ -166,7 +165,6 @@ export default function SidebarContent({
   onCollapseSidebar,
   updateAvailable,
   restartRequired,
-  releaseInfo,
   latestVersion,
   onShowVersionModal,
   onShowSettings,
@@ -204,6 +202,9 @@ export default function SidebarContent({
         isRefreshing={isRefreshing}
         onCreateProject={onCreateProject}
         onCollapseSidebar={onCollapseSidebar}
+        updateAvailable={updateAvailable}
+        latestVersion={latestVersion}
+        onShowVersionModal={onShowVersionModal}
         t={t}
       />
 
@@ -685,11 +686,7 @@ export default function SidebarContent({
 
       {!isRenamingOnMobile && (
         <SidebarFooter
-          updateAvailable={updateAvailable}
           restartRequired={restartRequired}
-          releaseInfo={releaseInfo}
-          latestVersion={latestVersion}
-          onShowVersionModal={onShowVersionModal}
           onShowSettings={onShowSettings}
           t={t}
         />
