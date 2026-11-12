@@ -10,6 +10,16 @@ import { WebSocket } from 'ws';
 
 import { handleShellConnection } from '@/modules/websocket/services/shell-websocket.service.js';
 
+// Launch commands depend on CLAUDE_CLI_PATH; start every test from a bare `claude`
+// whatever the environment running the tests sets.
+const inheritedClaudeCliPath = process.env.CLAUDE_CLI_PATH;
+delete process.env.CLAUDE_CLI_PATH;
+test.after(() => {
+  if (inheritedClaudeCliPath !== undefined) {
+    process.env.CLAUDE_CLI_PATH = inheritedClaudeCliPath;
+  }
+});
+
 function createFakeSocket() {
   const socket = new EventEmitter() as EventEmitter & {
     readyState: number;
@@ -318,11 +328,11 @@ function withClaudeConfig(body: (fixture: ClaudeConfigFixture) => void, homeName
   }
 }
 
-// The server-owned settings file a light launch points `--settings` at. The
-// default fixture HOME has no quote in it, so bash quoting is a plain wrap.
+// The server-owned settings file a light PowerShell launch points `--settings`
+// at. bash launches pass the setting inline instead.
 const themeSettingsPath = (theme: string) =>
   path.join(os.homedir(), '.cloudcli', `claude-shell-theme-${theme}.json`);
-const themeFlag = (theme: string) => ` --settings '${themeSettingsPath(theme)}'`;
+const themeFlag = (theme: string) => ` --settings '{"theme":"${theme}"}'`;
 
 // The flag outranks the user's own settings, so a dark Shell tab must not send
 // one: it would turn a daltonized or ANSI theme back into the plain dark one.
@@ -378,10 +388,12 @@ test('a light Shell tab swaps a dark Claude theme for its light variant', () => 
       assert.equal(calls.length, 1);
       if (os.platform() !== 'win32') {
         assert.equal(calls[0].command, `claude${themeFlag(expectedTheme)}`, `user theme ${userTheme}`);
+        assert.equal(fs.existsSync(themeSettingsPath(expectedTheme)), false, 'bash launches write no settings file');
+      } else {
+        assert.deepEqual(JSON.parse(fs.readFileSync(themeSettingsPath(expectedTheme), 'utf8')), {
+          theme: expectedTheme,
+        });
       }
-      assert.deepEqual(JSON.parse(fs.readFileSync(themeSettingsPath(expectedTheme), 'utf8')), {
-        theme: expectedTheme,
-      });
       assert.equal(calls[0].env.COLORFGBG, '0;15');
     });
   }
@@ -562,9 +574,10 @@ test('the light theme rides along with bypass and resume launches', () => {
   });
 });
 
-// The file lives in the app's own data folder: the user's Claude config and
-// the project are only ever read.
-test('the light theme settings file is written once to the app data folder', () => {
+// PowerShell launches get the theme in a file in the app's own data folder:
+// the user's Claude config and the project are only ever read.
+test('the light theme settings file is written once to the app data folder', (t) => {
+  t.mock.method(os, 'platform', () => 'win32');
   withClaudeConfig(({ configHome, home, projectPath, write }) => {
     write(path.join(configHome, 'settings.json'), { theme: 'dark-daltonized' });
     const configBefore = fs.readdirSync(configHome).sort();
@@ -593,9 +606,10 @@ test('the light theme settings file is written once to the app data folder', () 
 });
 
 // Windows runs the command through `powershell.exe -Command`, which is why the
-// theme travels as a file path: PowerShell strips the double quotes of inline
-// JSON when it hands an argument to a native program.
-test('the settings file path is quoted for bash and for PowerShell', (t) => {
+// theme travels as a file path there: PowerShell strips the double quotes of
+// inline JSON when it hands an argument to a native program. bash keeps them,
+// so bash launches pass the JSON itself and need no file.
+test('the theme is inline JSON for bash and a quoted settings file path for PowerShell', (t) => {
   if (os.platform() === 'win32') {
     t.skip('asserts the bash launch and POSIX paths first');
     return;
@@ -606,11 +620,12 @@ test('the settings file path is quoted for bash and for PowerShell', (t) => {
 
     launch(dependencies, { provider: 'claude', colorScheme: 'light' }, projectPath);
     launch(dependencies, { provider: 'claude', colorScheme: 'light', hasSession: true }, projectPath);
+    assert.equal(fs.existsSync(settingsPath), false, 'bash launches write no settings file');
     t.mock.method(os, 'platform', () => 'win32');
     launch(dependencies, { provider: 'claude', colorScheme: 'light' }, projectPath);
     launch(dependencies, { provider: 'claude', colorScheme: 'light', hasSession: true }, projectPath);
 
-    const bashFlag = ` --settings '${settingsPath.replace(/'/g, `'\\''`)}'`;
+    const bashFlag = ` --settings '{"theme":"light"}'`;
     const powerShellFlag = ` --settings '${settingsPath.replace(/['\u2019]/g, '$&$&')}'`;
     assert.ok(settingsPath.includes("it's a \u2019quoted\u2019 home"), settingsPath);
     assert.deepEqual(calls.map((call) => [call.shell, ...call.args]), [
@@ -624,13 +639,14 @@ test('the settings file path is quoted for bash and for PowerShell', (t) => {
       ],
     ]);
     // Spelled out once, so the escaping above is not only checked against itself.
-    assert.ok(calls[0].command.endsWith(`/it'\\''s a \u2019quoted\u2019 home/.cloudcli/claude-shell-theme-light.json'`));
     assert.ok(calls[2].command.endsWith(`/it''s a \u2019\u2019quoted\u2019\u2019 home/.cloudcli/claude-shell-theme-light.json'`));
     assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { theme: 'light' });
   }, "it's a \u2019quoted\u2019 home");
 });
 
 test('a settings file that cannot be written drops the flag, logs once and still launches', (t) => {
+  // Only PowerShell launches use the file.
+  t.mock.method(os, 'platform', () => 'win32');
   withClaudeConfig(({ home, projectPath, write }) => {
     // A file where the app data folder should be makes every write fail.
     write(path.join(home, '.cloudcli'), 'not a folder');
@@ -744,5 +760,72 @@ test('other shells and initial commands only get the COLORFGBG hint', () => {
       calls.map((call) => call.env.COLORFGBG),
       ['0;15', '0;15', '0;15', '15;0']
     );
+  });
+});
+
+// A CLAUDE_CLI_PATH wrapper (one that configures or sandboxes claude) must see
+// Shell tab sessions as it sees chat runs, the login button's included.
+test('the Shell tab launches CLAUDE_CLI_PATH when it is set, quoted for bash and PowerShell', (t) => {
+  withClaudeConfig(({ projectPath }) => {
+    process.env.CLAUDE_CLI_PATH = "/opt/it's claude/bin/claude";
+    try {
+      const { calls, dependencies } = spawnRecorder('resumed-session-id');
+      const claude = `'/opt/it'\\''s claude/bin/claude'`;
+
+      launch(dependencies, { provider: 'claude', colorScheme: 'dark' }, projectPath);
+      launch(dependencies, { provider: 'claude', hasSession: true }, projectPath);
+      launch(dependencies, { provider: 'claude', bypassPermissions: true }, projectPath);
+      launch(dependencies, { provider: 'claude', colorScheme: 'light' }, projectPath);
+      launch(dependencies, { provider: 'claude', initialCommand: 'claude --dangerously-skip-permissions /login' }, projectPath);
+      launch(dependencies, { provider: 'claude', initialCommand: 'claude' }, projectPath);
+      launch(dependencies, { initialCommand: 'claudette --version' }, projectPath);
+      launch(dependencies, { provider: 'plain-shell', initialCommand: 'echo claude' }, projectPath);
+      launch(dependencies, { provider: 'codex' }, projectPath);
+
+      assert.deepEqual(calls.map((call) => call.command), [
+        claude,
+        `${claude} --resume "resumed-session-id" || ${claude}`,
+        `${claude} --dangerously-skip-permissions`,
+        `${claude}${themeFlag('light')}`,
+        `${claude} --dangerously-skip-permissions /login`,
+        claude,
+        'claudette --version',
+        'echo claude',
+        'codex',
+      ]);
+
+      process.env.CLAUDE_CLI_PATH = 'C:\\Tools\\claude wrapper\\claude.exe';
+      t.mock.method(os, 'platform', () => 'win32');
+      const windows = spawnRecorder('resumed-session-id');
+      launch(windows.dependencies, { provider: 'claude' }, projectPath);
+      launch(windows.dependencies, { provider: 'claude', hasSession: true }, projectPath);
+      // PowerShell treats a quoted path as a string; `&` runs it.
+      const windowsClaude = `& 'C:\\Tools\\claude wrapper\\claude.exe'`;
+      assert.deepEqual(windows.calls.map((call) => [call.shell, call.command]), [
+        ['powershell.exe', windowsClaude],
+        [
+          'powershell.exe',
+          `${windowsClaude} --resume "resumed-session-id"; if ($LASTEXITCODE -ne 0) { ${windowsClaude} }`,
+        ],
+      ]);
+    } finally {
+      delete process.env.CLAUDE_CLI_PATH;
+    }
+  });
+});
+
+test('without CLAUDE_CLI_PATH the Shell tab launches claude from PATH, the login button included', () => {
+  withClaudeConfig(({ projectPath }) => {
+    process.env.CLAUDE_CLI_PATH = '  ';
+    try {
+      const { calls, dependencies } = spawnRecorder();
+      launch(dependencies, { provider: 'claude' }, projectPath);
+      launch(dependencies, { provider: 'claude', initialCommand: 'claude --dangerously-skip-permissions /login' }, projectPath);
+      if (os.platform() !== 'win32') {
+        assert.deepEqual(calls.map((call) => call.command), ['claude', 'claude --dangerously-skip-permissions /login']);
+      }
+    } finally {
+      delete process.env.CLAUDE_CLI_PATH;
+    }
   });
 });

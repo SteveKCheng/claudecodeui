@@ -5,6 +5,7 @@ import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
+import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
 import { parseIncomingJsonObject, stripAnsiSequences } from '@/shared/utils.js';
 
 type ShellIncomingMessage = {
@@ -223,7 +224,7 @@ function buildShellCommand(
   const otherProgram = (command: string): ShellLaunch => ({ command, claudeFollowsAppTheme: false });
 
   if (isPlainShell) {
-    return otherProgram(initialCommand);
+    return otherProgram(withConfiguredClaude(initialCommand));
   }
 
   if (provider === 'cursor') {
@@ -258,17 +259,47 @@ function buildShellCommand(
     : '';
   const theme = buildClaudeThemeLaunch(readColorScheme(message.colorScheme), projectPath);
   const launchFlags = `${bypassFlag}${theme.flag}`;
+  const claude = getClaudeLaunchCommand();
   if (resumeSessionId) {
     const command = os.platform() === 'win32'
-      ? `claude --resume "${resumeSessionId}"${launchFlags}; if ($LASTEXITCODE -ne 0) { claude${launchFlags} }`
-      : `claude --resume "${resumeSessionId}"${launchFlags} || claude${launchFlags}`;
+      ? `${claude} --resume "${resumeSessionId}"${launchFlags}; if ($LASTEXITCODE -ne 0) { ${claude}${launchFlags} }`
+      : `${claude} --resume "${resumeSessionId}"${launchFlags} || ${claude}${launchFlags}`;
     return { command, claudeFollowsAppTheme: theme.followsAppTheme };
   }
   if (initialCommand) {
-    // A caller's own command (e.g. `claude /login`) is launched as given.
-    return otherProgram(initialCommand);
+    // A caller's own command (e.g. `claude /login`) is launched as given,
+    // except that a Claude CLI launch uses the configured executable.
+    return otherProgram(withConfiguredClaude(initialCommand));
   }
-  return { command: `claude${launchFlags}`, claudeFollowsAppTheme: theme.followsAppTheme };
+  return { command: `${claude}${launchFlags}`, claudeFollowsAppTheme: theme.followsAppTheme };
+}
+
+/**
+ * The Claude CLI as the launch shell should invoke it. CLAUDE_CLI_PATH, when
+ * set, is the same executable chat runs use, so a wrapper that configures or
+ * sandboxes claude covers Shell tab sessions too; otherwise `claude` comes from
+ * PATH as before. PowerShell (win32) runs a quoted path only through `&`.
+ */
+function getClaudeLaunchCommand(): string {
+  const configuredPath = process.env.CLAUDE_CLI_PATH?.trim()
+    ? resolveClaudeCodeExecutablePath(process.env.CLAUDE_CLI_PATH)
+    : undefined;
+  if (!configuredPath) {
+    return 'claude';
+  }
+  const quotedPath = quoteShellArgument(configuredPath);
+  return os.platform() === 'win32' ? `& ${quotedPath}` : quotedPath;
+}
+
+/**
+ * Points a caller's command that starts the Claude CLI (the login button sends
+ * `claude --dangerously-skip-permissions /login`) at the configured executable.
+ * Anything else, `claudette` included, is left as given.
+ */
+function withConfiguredClaude(command: string): string {
+  return /^claude(?=\s|$)/.test(command)
+    ? `${getClaudeLaunchCommand()}${command.slice('claude'.length)}`
+    : command;
 }
 
 // Claude Code's built-in theme ids (the `/theme` picker of CLI 2.1.280). A
@@ -376,8 +407,8 @@ function resolveClaudeTheme(projectPath: string): string {
 let hasLoggedThemeSettingsFileError = false;
 
 /**
- * Returns a settings file that holds only `{"theme": theme}`, writing it when
- * it is missing or differs. It lives in the app's own data folder
+ * Returns a settings file that holds only `{"theme": theme}`, for PowerShell
+ * launches, writing it when it is missing or differs. It lives in the app's own data folder
  * (`~/.cloudcli`, like the chat assets); the user's Claude config is never
  * written. The write goes through a temp file and a rename, so a CLI starting
  * at the same time never reads half a file. Returns null, and logs once, when
@@ -436,9 +467,12 @@ type ClaudeThemeLaunch = {
  * Claude Code paints its own colours in its own theme, dark by default, so in
  * a light Shell tab its prompt rows became dark bands. Only a light tab gets a
  * flag, and only when the user's theme is a dark one: it is swapped for the
- * matching light variant. `--settings` applies it to this launch only. It is
- * given a file path rather than inline JSON because PowerShell strips the
- * JSON's double quotes when it passes an argument to a native program.
+ * matching light variant. `--settings` applies it to this launch only. bash
+ * gets the setting as inline JSON, so the launch needs no file the CLI might
+ * not be able to see (a CLAUDE_CLI_PATH wrapper that sandboxes claude can hide
+ * `~/.cloudcli`, and the CLI refuses to start on a missing settings file).
+ * PowerShell (win32) strips the JSON's double quotes when it passes an
+ * argument to a native program, so there the setting goes in a file.
  *
  * The CLI follows the app theme when it gets that flag, when a dark tab runs a
  * dark theme, and with `auto` (it asks the terminal, which xterm answers from
@@ -460,6 +494,9 @@ function buildClaudeThemeLaunch(colorScheme: ShellColorScheme | null, projectPat
   }
   if (colorScheme === 'dark') {
     return { flag: '', followsAppTheme: true };
+  }
+  if (os.platform() !== 'win32') {
+    return { flag: ` --settings ${quoteShellArgument(JSON.stringify({ theme: lightTheme }))}`, followsAppTheme: true };
   }
   const settingsPath = ensureClaudeThemeSettingsFile(lightTheme);
   return settingsPath
